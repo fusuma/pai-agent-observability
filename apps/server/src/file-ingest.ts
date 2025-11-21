@@ -122,29 +122,42 @@ function watchFile(filePath: string): void {
     return; // Already watching
   }
 
+  // Skip if file doesn't exist (common in production/container environments)
+  if (!existsSync(filePath)) {
+    console.log(`⏭️ File not found, skipping watch: ${filePath}`);
+    return;
+  }
+
   console.log(`👀 Watching: ${filePath}`);
   watchedFiles.add(filePath);
 
   // Set file position to END of file - only read NEW events from now on
   // Do NOT load historical events from before server start
-  if (existsSync(filePath)) {
+  try {
     const content = readFileSync(filePath, 'utf-8');
     filePositions.set(filePath, content.length);
     console.log(`📍 Positioned at end of file - only new events will be captured`);
+  } catch (err) {
+    console.log(`⚠️ Could not read file position: ${filePath}`);
   }
 
   // Watch for changes
-  const watcher = watch(filePath, (eventType) => {
-    if (eventType === 'change') {
-      const newEvents = readNewEvents(filePath);
-      storeEvents(newEvents);
-    }
-  });
+  try {
+    const watcher = watch(filePath, (eventType) => {
+      if (eventType === 'change') {
+        const newEvents = readNewEvents(filePath);
+        storeEvents(newEvents);
+      }
+    });
 
-  watcher.on('error', (error) => {
-    console.error(`Error watching ${filePath}:`, error);
+    watcher.on('error', (error) => {
+      console.error(`Error watching ${filePath}:`, error);
+      watchedFiles.delete(filePath);
+    });
+  } catch (err) {
+    console.log(`⚠️ Could not watch file: ${filePath}`);
     watchedFiles.delete(filePath);
-  });
+  }
 }
 
 /**
