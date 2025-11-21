@@ -2,10 +2,7 @@
 nixPkgs = ["bun", "nodejs_20"]
 
 [phases.install]
-cmds = [
-  "cd apps/server && bun install",
-  "cd apps/client && bun install && bun run build"
-]
+cmds = ["cd apps/server && bun install"]
 
 [start]
 cmd = "bun apps/server/src/index.ts"
