@@ -12,9 +12,28 @@ import {
   getThemeStats
 } from './theme';
 import { startFileIngestion, getRecentEvents, getFilterOptions } from './file-ingest';
+import {
+  createTerminalSession,
+  getTerminal,
+  resizeTerminal,
+  writeToTerminal,
+  closeTerminal,
+  isPasswordRequired,
+  validatePassword,
+  type TerminalMessage,
+  type TerminalResponse
+} from './terminal';
 
 // Store WebSocket clients
 const wsClients = new Set<any>();
+
+// Store terminal WebSocket clients with their auth state
+interface TerminalClient {
+  ws: any;
+  authenticated: boolean;
+  sessionId: string;
+}
+const terminalClients = new Map<any, TerminalClient>();
 
 // Start file-based ingestion (reads from ~/.claude/history/raw-outputs/)
 // Pass a callback to broadcast new events to connected WebSocket clients
@@ -61,7 +80,14 @@ async function serveStatic(pathname: string): Promise<Response | null> {
 
   // For SPA: serve index.html for unknown routes (client-side routing)
   const indexPath = join(STATIC_DIR, 'index.html');
-  if (existsSync(indexPath) && !pathname.startsWith('/api') && !pathname.startsWith('/events')) {
+  if (existsSync(indexPath) && !pathname.startsWith('/api') && !pathname.startsWith('/events') && !pathname.startsWith('/stream') && !pathname.startsWith('/terminal')) {
+    return new Response(Bun.file(indexPath), {
+      headers: { 'Content-Type': 'text/html' }
+    });
+  }
+
+  // Serve index.html for /terminal route (SPA routing)
+  if (pathname === '/terminal' && existsSync(indexPath)) {
     return new Response(Bun.file(indexPath), {
       headers: { 'Content-Type': 'text/html' }
     });
@@ -282,9 +308,18 @@ const server = Bun.serve({
       });
     }
     
-    // WebSocket upgrade
+    // WebSocket upgrade for event stream
     if (url.pathname === '/stream') {
-      const success = server.upgrade(req);
+      const success = server.upgrade(req, { data: { type: 'stream' } });
+      if (success) {
+        return undefined;
+      }
+    }
+
+    // WebSocket upgrade for terminal
+    if (url.pathname === '/terminal') {
+      const sessionId = crypto.randomUUID();
+      const success = server.upgrade(req, { data: { type: 'terminal', sessionId } });
       if (success) {
         return undefined;
       }
@@ -310,28 +345,107 @@ const server = Bun.serve({
   },
   
   websocket: {
-    open(ws) {
-      console.log('WebSocket client connected');
-      wsClients.add(ws);
-      
-      // Send recent events on connection
-      const events = getRecentEvents(50);
-      ws.send(JSON.stringify({ type: 'initial', data: events }));
+    open(ws: any) {
+      const { type, sessionId } = ws.data || {};
+
+      if (type === 'terminal') {
+        console.log('Terminal WebSocket client connected:', sessionId);
+        const client: TerminalClient = {
+          ws,
+          authenticated: !isPasswordRequired(),
+          sessionId
+        };
+        terminalClients.set(ws, client);
+
+        // Send auth requirement status
+        if (isPasswordRequired()) {
+          const response: TerminalResponse = { type: 'auth_required' };
+          ws.send(JSON.stringify(response));
+        } else {
+          // No password required, create terminal immediately
+          const response: TerminalResponse = { type: 'auth_success' };
+          ws.send(JSON.stringify(response));
+          createTerminalSession(
+            sessionId,
+            (data) => ws.send(JSON.stringify({ type: 'output', data })),
+            (code) => ws.send(JSON.stringify({ type: 'exit', code }))
+          );
+        }
+      } else {
+        // Default: stream client
+        console.log('WebSocket client connected');
+        wsClients.add(ws);
+
+        // Send recent events on connection
+        const events = getRecentEvents(50);
+        ws.send(JSON.stringify({ type: 'initial', data: events }));
+      }
     },
-    
-    message(ws, message) {
-      // Handle any client messages if needed
-      console.log('Received message:', message);
+
+    message(ws: any, message: string | Buffer) {
+      const client = terminalClients.get(ws);
+
+      if (client) {
+        // Terminal message
+        try {
+          const msg: TerminalMessage = JSON.parse(message.toString());
+
+          if (msg.type === 'auth') {
+            if (validatePassword(msg.password || '')) {
+              client.authenticated = true;
+              const response: TerminalResponse = { type: 'auth_success' };
+              ws.send(JSON.stringify(response));
+
+              // Create terminal session after auth
+              createTerminalSession(
+                client.sessionId,
+                (data) => ws.send(JSON.stringify({ type: 'output', data })),
+                (code) => ws.send(JSON.stringify({ type: 'exit', code }))
+              );
+            } else {
+              const response: TerminalResponse = { type: 'auth_failed' };
+              ws.send(JSON.stringify(response));
+            }
+          } else if (client.authenticated) {
+            if (msg.type === 'input' && msg.data) {
+              writeToTerminal(client.sessionId, msg.data);
+            } else if (msg.type === 'resize' && msg.cols && msg.rows) {
+              resizeTerminal(client.sessionId, msg.cols, msg.rows);
+            }
+          }
+        } catch (err) {
+          console.error('Terminal message error:', err);
+        }
+      } else {
+        // Stream message
+        console.log('Received message:', message);
+      }
     },
-    
-    close(ws) {
-      console.log('WebSocket client disconnected');
-      wsClients.delete(ws);
+
+    close(ws: any) {
+      const client = terminalClients.get(ws);
+
+      if (client) {
+        console.log('Terminal WebSocket client disconnected:', client.sessionId);
+        closeTerminal(client.sessionId);
+        terminalClients.delete(ws);
+      } else {
+        console.log('WebSocket client disconnected');
+        wsClients.delete(ws);
+      }
     },
-    
-    error(ws, error) {
-      console.error('WebSocket error:', error);
-      wsClients.delete(ws);
+
+    error(ws: any, error: Error) {
+      const client = terminalClients.get(ws);
+
+      if (client) {
+        console.error('Terminal WebSocket error:', error);
+        closeTerminal(client.sessionId);
+        terminalClients.delete(ws);
+      } else {
+        console.error('WebSocket error:', error);
+        wsClients.delete(ws);
+      }
     }
   }
 });
@@ -339,3 +453,4 @@ const server = Bun.serve({
 console.log(`🚀 Server running on http://localhost:${server.port}`);
 console.log(`📊 WebSocket endpoint: ws://localhost:${server.port}/stream`);
 console.log(`📮 POST events to: http://localhost:${server.port}/events`);
+console.log(`💻 Terminal endpoint: ws://localhost:${server.port}/terminal`);
