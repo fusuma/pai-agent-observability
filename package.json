@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "concurrently \"cd apps/server && bun dev\" \"cd apps/client && bun dev\"",
-    "build": "cd apps/client && bun install && bun run build",
+    "build:client": "cd apps/client && bun install && bun run build",
     "start": "bun apps/server/src/index.ts",
     "install:all": "cd apps/server && bun install && cd ../client && bun install"
   },
