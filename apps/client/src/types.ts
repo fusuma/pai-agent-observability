@@ -36,6 +36,14 @@ export interface HookEvent {
   timestamp?: number;
   model_name?: string;
 
+  // Extended properties for search
+  model?: string;
+  tool_name?: string;
+  tool_command?: string;
+  tool_file?: { path?: string };
+  hitl_question?: string;
+  hitl_permission?: string;
+
   // NEW: Optional HITL data
   humanInTheLoop?: HumanInTheLoop;
   humanInTheLoopStatus?: HumanInTheLoopStatus;

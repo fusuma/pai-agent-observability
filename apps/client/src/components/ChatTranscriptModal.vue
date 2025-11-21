@@ -109,7 +109,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue';
 import ChatTranscript from './ChatTranscript.vue';
-import { MessageSquare, Copy, CheckCircle, X, User, Bot, Settings, Wrench, FileText, PenTool, Edit, Search } from 'lucide-vue-next';
+import { MessageSquare, CheckCircle, User, Bot, Settings, Wrench, FileText, PenTool, Edit, Search } from 'lucide-vue-next';
 
 const props = defineProps<{
   isOpen: boolean;

@@ -208,8 +208,7 @@ export class ChartRenderer {
 
         if (entries.length > 0) {
           this.ctx.save();
-          this.ctx.font = '11px system-ui, -apple-system, sans-serif';
-          this.ctx.fontWeight = 'bold';
+          this.ctx.font = 'bold 11px system-ui, -apple-system, sans-serif';
 
           // Calculate total width needed
           const iconSize = 44;  // Doubled from 22px to 44px for maximum visibility

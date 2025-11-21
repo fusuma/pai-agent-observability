@@ -252,7 +252,6 @@ import {
   CheckCircle,
   Bell,
   StopCircle,
-  Users,
   Package,
   MessageSquare,
   Rocket,
