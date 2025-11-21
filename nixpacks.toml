@@ -4,5 +4,8 @@ nixPkgs = ["bun", "nodejs_20"]
 [phases.install]
 cmds = ["cd apps/server && bun install"]
 
+[phases.build]
+cmds = ["echo 'Server-only deploy, skipping client build'"]
+
 [start]
 cmd = "bun apps/server/src/index.ts"
